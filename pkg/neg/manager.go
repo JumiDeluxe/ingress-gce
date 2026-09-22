@@ -298,7 +298,7 @@ func (manager *syncerManager) EnsureSyncers(namespace, name string, newPorts neg
 					epc,
 					string(manager.kubeSystemUID),
 					manager.syncerMetrics,
-					syncerKey.NegType == negtypes.VmIpPortEndpointType && !manager.namer.IsNEG(portInfo.NegName),
+					manager.isCustomNegName(syncerKey.NegType, portInfo.NegName),
 					true,
 					manager.logger,
 					manager.lpConfig,
@@ -331,6 +331,12 @@ func (manager *syncerManager) EnsureSyncers(namespace, name string, newPorts neg
 	manager.negMetrics.PublishNegManagerProcessMetrics(metrics.SyncProcess, err, start)
 
 	return successfulSyncers, errorSyncers, err
+}
+
+func (manager *syncerManager) isCustomNegName(negType negtypes.NetworkEndpointType, negName string) bool {
+	isL7CustomNegName := negType == negtypes.VmIpPortEndpointType && !manager.namer.IsNEG(negName)
+	isL4CustomNegName := negType == negtypes.VmIpEndpointType && !manager.l4Namer.IsNEG(negName)
+	return isL7CustomNegName || isL4CustomNegName
 }
 
 // updatePreprovisioningZones updates the tracked pre-provisioning zones for the service
@@ -837,7 +843,8 @@ func (manager *syncerManager) ensureDeleteNetworkEndpointGroup(name, zone string
 	if expectedDesc != nil {
 		// Controller managed custom named negs will always have a populated description, so do not delete custom named
 		// negs with empty descriptions.
-		if !manager.namer.IsNEG(name) && neg.Description == "" {
+		isCustomName := !manager.namer.IsNEG(name) && !manager.l4Namer.IsNEG(name)
+		if isCustomName && neg.Description == "" {
 			manager.logger.V(2).Info("Skipping deletion of Neg because name was not generated and empty description", "negName", name, "zone", zone)
 			return nil
 		}
@@ -949,7 +956,7 @@ func ensureNegCRLabels(negCR *negv1beta1.ServiceNetworkEndpointGroup, labels map
 			if len(negCR.OwnerReferences) == 1 {
 				svcName = negCR.OwnerReferences[0].Name
 			}
-			return false, fmt.Errorf("Neg %s/%s has a label mismatch. Expected key %s to have the value %s but found %s. Neg is likely taken by % service. Please remove previous neg before creating this configuration", negCR.Namespace, negCR.Name, key, value, existingVal, svcName)
+			return false, fmt.Errorf("Neg %s/%s has a label mismatch. Expected key %s to have the value %s but found %s. Neg is likely taken by %s service. Please remove previous neg before creating this configuration", negCR.Namespace, negCR.Name, key, value, existingVal, svcName)
 		}
 	}
 
